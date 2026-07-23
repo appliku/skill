@@ -101,12 +101,19 @@ appliku teams get <team_path>
 appliku apps list --team <team_path>
 appliku apps list --team <team_path> --output json
 
-# Application-level logs (async, polls until ready)
+# Trigger a deployment
+appliku apps deploy --team <team_path> --app <id>
+
+# Delete a single config var (leaves the rest untouched)
+appliku apps delete-config-var --team <team_path> --app <id> --key SOME_VAR
+
+# Application logs — one command, any deployment mode, one or more processes.
+# With no --process it returns logs for ALL of the app's processes.
+appliku apps logs --team <team_path> --app <id>
 appliku apps logs --team <team_path> --app <id> --process web
 appliku apps logs --team <team_path> --app <id> --process web --process celery --tail 200
 
-# Service logs (direct, single process)
-appliku apps service-logs --team <team_path> --app <id> --service web --tail 100
+# service-logs is DEPRECATED — use `apps logs -p <service>` instead.
 
 # Nginx / load balancer logs
 appliku apps nginx-logs         --team <team_path> --app <id> --domain example.com --tail 100
@@ -166,6 +173,16 @@ appliku clusters delete --team <team_path> --id <cluster_id>
 ```bash
 appliku servers list --team <team_path>
 appliku servers get  --team <team_path> --id <server_id>
+
+# Hetzner Cloud server provisioning (requires the team to have a stored
+# Hetzner Cloud token, configured in the dashboard under Team Settings ->
+# Cloud Providers).
+appliku servers hetzner-info   --team <team_path> --show locations
+appliku servers hetzner-info   --team <team_path> --show server-types \
+  --category "ARM" --location nbg1
+appliku servers create-hetzner --team <team_path> \
+  --location nbg1 --server-type cax11 \
+  [--enable-backups] [--cluster <cluster_id>]
 ```
 
 ### invites
@@ -213,10 +230,12 @@ client.apps.deploy("my-team", app_id=42)
 # Config vars
 vars = client.apps.get_config_vars("my-team", app_id=42)
 client.apps.set_config_vars("my-team", app_id=42, vars={"DEBUG": "false"})
+client.apps.delete_config_var("my-team", app_id=42, key="OLD_VAR")  # returns remaining vars
 
-# Logs
-logs = client.apps.get_logs("my-team", app_id=42, process="web", tail=100)
-logs = client.apps.get_service_logs("my-team", app_id=42, service="web", tail=100)
+# Logs — get_logs takes a list of processes (None = all), works on any mode.
+logs = client.apps.get_logs("my-team", app_id=42)  # all processes
+logs = client.apps.get_logs("my-team", app_id=42, processes=["web", "celery"], tail=100)
+# get_service_logs is a deprecated shim that delegates to get_logs.
 logs = client.apps.get_nginx_logs("my-team", app_id=42, domain="example.com", tail=100)
 logs = client.apps.get_load_balancer_logs("my-team", app_id=42, domain="example.com", tail=100)
 ```
@@ -284,6 +303,17 @@ client.clusters.delete("my-team", cluster_id=2)
 ```python
 client.servers.list("my-team")
 client.servers.get("my-team", server_id=10)
+
+# Hetzner Cloud provisioning. Requires the team to have a stored Hetzner Cloud
+# token. Server types and locations are pulled live from Hetzner.
+info = client.servers.get_hetzner_cloud_info("my-team")
+client.servers.create_hetzner_cloud(
+    "my-team",
+    location="nbg1",
+    server_type="cax11",
+    hetzner_backups_enabled=False,
+    cluster=None,
+)
 ```
 
 ### invites
@@ -355,11 +385,11 @@ appliku deployments logs --team my-team --id <deployment_id>
 ### Tail application logs
 
 ```bash
-# All processes (web + celery)
-appliku apps logs --team my-team --app 42 --process web --process celery --tail 200
+# All processes (default when no --process is given)
+appliku apps logs --team my-team --app 42 --tail 200
 
-# Single service, direct (faster)
-appliku apps service-logs --team my-team --app 42 --service web --tail 100
+# Specific processes
+appliku apps logs --team my-team --app 42 --process web --process celery --tail 200
 ```
 
 ### Add a custom domain and verify DNS
@@ -378,8 +408,8 @@ appliku datastores restart --team my-team --app 42 --id 5
 
 ## Gotchas
 
-- **CLI surface < SDK surface**: The SDK exposes `create`, `update`, `deploy`, config vars, etc. that the CLI does not. Use the Python SDK for those operations.
-- **`apps logs` is async**: It POSTs a request, then polls until logs are ready. `apps service-logs` is a single GET and returns immediately — prefer it when you only need one process.
-- **`--process` is repeatable**: Pass it multiple times to fetch logs for multiple processes in one call: `--process web --process celery`.
+- **CLI surface < SDK surface**: The SDK exposes `create`, `update`, and full config-var management that the CLI does not. Use the Python SDK for those operations. (The CLI does now cover `apps deploy` and `apps delete-config-var`.)
+- **`apps logs` is the one logs command**: It works for both server-mode and cluster-mode apps and returns logs for one or more processes. It POSTs a request, then polls until logs are ready. (`apps service-logs` still exists as a deprecated alias for `apps logs -p <service>`.)
+- **`--process` is repeatable and optional**: Pass it multiple times for multiple processes (`--process web --process celery`); omit it entirely to get logs for **all** of the app's processes.
 - **Machine-readable output**: Add `--output json` to any list command when you need to parse IDs programmatically.
 - **`APPLIKU_TOKEN` for CI**: Set this environment variable to avoid interactive login in automated contexts.
