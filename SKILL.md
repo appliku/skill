@@ -110,6 +110,14 @@ non-owner.
 appliku apps list --team <team_path>
 appliku apps list --team <team_path> --output json
 
+# Create from GitHub or GitLab. Use exactly one positive target ID.
+appliku apps create github owner/repository -t <team_path> -n myapp -b main --server <id>
+appliku apps create gitlab group/repository -t <team_path> -n myapp -b main --cluster <id>
+
+# Create from custom Git. A URL file can contain HTTPS credentials.
+appliku apps create custom -t <team_path> -n myapp -b main --server <id> \
+  --git-url-file <path-or-> [--private-key-file <path>]
+
 # Trigger a deployment
 appliku apps deploy --team <team_path> --app <id>
 
@@ -128,6 +136,16 @@ appliku apps logs --team <team_path> --app <id> --process web --process celery -
 appliku apps nginx-logs         --team <team_path> --app <id> --domain example.com --tail 100
 appliku apps load-balancer-logs --team <team_path> --app <id> --domain example.com --tail 100
 ```
+
+Each create command accepts `--static-site` and `--output table|json`. Custom
+Git also accepts a positional public URL, but exactly one positional URL or
+`--git-url-file` is required. Use a file or standard input (`--git-url-file -`)
+for a URL that contains credentials. Private keys are accepted only through
+`--private-key-file`. Output is limited to safe application fields and does not
+contain these secrets.
+
+Create starts the asynchronous initial `appliku.yml` inspection. It does not
+deploy the application. Deploy it separately when its setup is complete.
 
 ### deployments
 
@@ -231,7 +249,20 @@ client = Appliku(token="YOUR_TOKEN")   # explicit token
 ```python
 client.apps.list("my-team")
 client.apps.get("my-team", app_id=42)
-client.apps.create("my-team", name="my-app", branch="main")
+client.apps.create_from_github(
+    "my-team", "owner/repository", name="myapp", branch="main", server=12
+)
+client.apps.create_from_gitlab(
+    "my-team", "group/repository", name="myapp", branch="main", cluster=7
+)
+client.apps.create_from_custom_git(
+    "my-team",
+    "git@example.com:team/repository.git",
+    name="myapp",
+    branch="main",
+    server=12,
+    private_key=private_key_contents,
+)
 client.apps.update("my-team", app_id=42, branch="develop")
 client.apps.delete("my-team", app_id=42)
 client.apps.deploy("my-team", app_id=42)
@@ -422,7 +453,7 @@ appliku datastores restart --team my-team --app 42 --id 5
 
 ## Gotchas
 
-- **CLI surface < SDK surface**: The SDK exposes `create`, `update`, and full config-var management that the CLI does not. Use the Python SDK for those operations. (The CLI does now cover `apps deploy` and `apps delete-config-var`.)
+- **Create does not deploy**: Application creation starts initial configuration inspection only. Deploy in a separate command after setup is complete.
 - **`apps logs` is the one logs command**: It works for both server-mode and cluster-mode apps and returns logs for one or more processes. It POSTs a request, then polls until logs are ready. (`apps service-logs` still exists as a deprecated alias for `apps logs -p <service>`.)
 - **`--process` is repeatable and optional**: Pass it multiple times for multiple processes (`--process web --process celery`); omit it entirely to get logs for **all** of the app's processes.
 - **Machine-readable output**: Add `--output json` to any list command when you need to parse IDs programmatically.
