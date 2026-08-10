@@ -147,6 +147,17 @@ contain these secrets.
 Create starts the asynchronous initial `appliku.yml` inspection. It does not
 deploy the application. Deploy it separately when its setup is complete.
 
+**The target must be ready.** A server or cluster that has not finished setup is
+refused with HTTP 400. Check before creating — `appliku servers list` reports a
+`ready` field, and only a ready target can host a new application:
+
+```bash
+appliku servers list --team <team_path> --output json | jq '.[] | select(.ready)'
+```
+
+A team whose servers are all still provisioning cannot create an application
+yet. Wait for setup to finish rather than retrying immediately.
+
 ### deployments
 
 ```bash
@@ -234,6 +245,24 @@ appliku ssh-keys add    --key "ssh-rsa AAAA... user@host"
 appliku ssh-keys add    --key "$(cat ~/.ssh/id_ed25519.pub)"
 appliku ssh-keys delete --id <key_id>
 ```
+
+**Only an OpenSSH public key is accepted.** The value must be one line starting
+with a key type (`ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp256`, ...) followed
+by base64 key data; a comment after it is kept. Anything else is rejected with
+HTTP 400.
+
+Send the `.pub` file, never the private key. These are commonly pasted here by
+mistake and all of them are refused:
+
+- a private key (`-----BEGIN ... PRIVATE KEY-----`, or base64 starting
+  `b3BlbnNzaC1rZXktdjEA`)
+- a PuTTY/RFC4716 export (`---- BEGIN SSH2 PUBLIC KEY ----`) — convert it with
+  `ssh-keygen -i -f key.pub` first
+- a fingerprint (`SHA256:...`), a git remote URL, or an access token
+
+Keys are also imported automatically when Git credentials are saved in the
+dashboard. Keys the provider serves that are not valid OpenSSH public keys are
+skipped, reported as `skipped_public_keys`, and summarized in one email.
 
 ## Python SDK Reference
 
