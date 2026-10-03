@@ -121,6 +121,14 @@ appliku apps create custom -t <team_path> -n myapp -b main --server <id> \
 # Trigger a deployment
 appliku apps deploy --team <team_path> --app <id>
 
+# Restart WITHOUT a build: same running image, current env vars and process
+# settings. No new code, no build, no release command. Build-time variables
+# (NEXT_PUBLIC_*, anything the build command reads) keep their old values ->
+# use `apps deploy` for those. Needs the backend with the restart endpoint; the
+# first restart needs one full deploy made with it. Not for static sites.
+appliku apps restart --team <team_path> --app <id>
+appliku apps restart --team <team_path> --app <id> --check   # possible? exit 1 + reason if not
+
 # Config vars: see the `config` group below. `apps delete-config-var` is
 # DEPRECATED — use `appliku config unset KEY` instead.
 
@@ -324,6 +332,8 @@ client.apps.create_from_custom_git(
 client.apps.update("my-team", app_id=42, branch="develop")
 client.apps.delete("my-team", app_id=42)
 client.apps.deploy("my-team", app_id=42)
+client.apps.restart("my-team", app_id=42)               # no build; {success, deployment_id}
+client.apps.restart_availability("my-team", app_id=42)  # {available, reason, source_number_id}
 
 # Config vars. get returns {"env_vars": [...]}; set takes a flat mapping.
 vars = client.apps.get_config_vars("my-team", app_id=42)
