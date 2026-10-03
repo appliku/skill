@@ -181,10 +181,15 @@ appliku config list --team <team_path> --app <id> --output shell  # NAME='value'
 appliku config get KEY --team <team_path> --app <id>           # value only; exit 1 if not set
 appliku config set A=1 B=2 --team <team_path> --app <id>       # merges; split on first '='
 appliku config set A=1 --team <team_path> --app <id> --deploy  # save, then start a full deployment
+appliku config set A=1 --team <team_path> --app <id> --restart # save, then restart WITHOUT a build
 appliku config unset A B --team <team_path> --app <id>         # missing names: warning, exit 0
 ```
 
-- Changes take effect on the next deployment; nothing restarts on save.
+- Changes take effect on the next deployment or restart; nothing restarts on save.
+  `--deploy` = full build; `--restart` = no build, runtime values only (build-time
+  variables like NEXT_PUBLIC_* keep old values -> use `--deploy` for those). The two
+  flags cannot be combined; neither runs when nothing was written. Saved-but-not-
+  started exits 1 with "Config saved, but ..." (do NOT retry the write).
 - `set` refuses `KEY=` (an empty value deletes on Appliku — use `unset`), the same
   name twice, and values with leading/trailing whitespace.
 - Variables defined in `appliku.yml` cannot be set or unset here. Replacing a
@@ -192,8 +197,8 @@ appliku config unset A B --team <team_path> --app <id>         # missing names: 
 - `set`/`unset` verify the API response and exit 1 naming any key not applied.
   The pre-write checks are advisory: a variable linked to a database between the
   check and the write is replaced without warning.
-- `set`/`unset` need a token with `env_vars` read + update; `--deploy` also needs
-  `deployments` create.
+- `set`/`unset` need a token with `env_vars` read + update; `--deploy`/`--restart`
+  also need `deployments` create.
 
 ### deployments
 
