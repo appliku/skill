@@ -121,8 +121,8 @@ appliku apps create custom -t <team_path> -n myapp -b main --server <id> \
 # Trigger a deployment
 appliku apps deploy --team <team_path> --app <id>
 
-# Delete a single config var (leaves the rest untouched)
-appliku apps delete-config-var --team <team_path> --app <id> --key SOME_VAR
+# Config vars: see the `config` group below. `apps delete-config-var` is
+# DEPRECATED — use `appliku config unset KEY` instead.
 
 # Application logs — one command, any deployment mode, one or more processes.
 # With no --process it returns logs for ALL of the app's processes.
@@ -161,6 +161,31 @@ A server is ready when it is active and its setup finished. A cluster is ready
 when its primary manager is — a cluster with no primary manager can never host
 an application. If nothing is ready, wait for setup to finish; retrying the
 create immediately just returns the same 400.
+
+### config
+
+Heroku-style environment variables (`heroku config` / `config:get` / `config:set` / `config:unset`).
+
+```bash
+appliku config list --team <team_path> --app <id>              # table: name, value, source, mode
+appliku config list --team <team_path> --app <id> --output json   # {"NAME": "value", ...}
+appliku config list --team <team_path> --app <id> --output shell  # NAME='value' (POSIX shell, not dotenv)
+appliku config get KEY --team <team_path> --app <id>           # value only; exit 1 if not set
+appliku config set A=1 B=2 --team <team_path> --app <id>       # merges; split on first '='
+appliku config set A=1 --team <team_path> --app <id> --deploy  # save, then start a full deployment
+appliku config unset A B --team <team_path> --app <id>         # missing names: warning, exit 0
+```
+
+- Changes take effect on the next deployment; nothing restarts on save.
+- `set` refuses `KEY=` (an empty value deletes on Appliku — use `unset`), the same
+  name twice, and values with leading/trailing whitespace.
+- Variables defined in `appliku.yml` cannot be set or unset here. Replacing a
+  database- or domain-linked variable with a static value needs `--replace-links`.
+- `set`/`unset` verify the API response and exit 1 naming any key not applied.
+  The pre-write checks are advisory: a variable linked to a database between the
+  check and the write is replaced without warning.
+- `set`/`unset` need a token with `env_vars` read + update; `--deploy` also needs
+  `deployments` create.
 
 ### deployments
 
