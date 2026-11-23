@@ -170,6 +170,38 @@ when its primary manager is — a cluster with no primary manager can never host
 an application. If nothing is ready, wait for setup to finish; retrying the
 create immediately just returns the same 400.
 
+### apps move
+
+Move a server-mode application (with its standalone datastores and volumes) to
+another server of the team. Team owners and admins only; `targets`, `plan` and
+`confirm` answer 403 while moves are not enabled for the team. Needs CLI 0.10.0.
+
+```bash
+appliku apps move targets --team <team_path> --app <id>          # "ok" or the first refusal per server
+appliku apps move plan    --team <team_path> --app <id> --to <server id or name> --wait
+appliku apps move confirm --team <team_path> --app <id> --name <app name> \
+  [--accept-unmoved <key> ...]                                   # starts the move: downtime
+appliku apps move status  --team <team_path> --app <id> --follow # until hold, end, or it waits for you
+appliku apps move finish  --team <team_path> --app <id>          # end the hold; no rollback after this
+appliku apps move rollback --team <team_path> --app <id> --accept-data-loss [--accept-new-domains]
+# also: list, cancel, retry, confirm-downtime, remove-forwarders, cleanup-now
+# (each takes --team, --app, optional --move <move_id>; the prompts take --yes)
+```
+
+- The plan only reads both servers; nothing changes until `confirm`. A plan
+  expires after 24 hours. Blockers in the plan stop the move; read them.
+- `--accept-unmoved` must name exactly the keys that the plan lists as "Not
+  moved". The data of these mounts stays on the old server; the application on
+  the new server does not get it. Do not accept them for the user without asking.
+- After the switch the move is in a hold (7 days): `rollback` moves the app back
+  and loses the data written on the new server since the move; `finish` ends the
+  hold early. Both are user decisions: ask first.
+- Every command uses the newest move unless `--move` is given. `status` prints
+  the actions that are possible now; the API can still refuse, and the CLI then
+  prints the reason (exit 1).
+- SDK `client.apps.update(server=...)` does not move data and is refused (400)
+  for an app with data when moves are enabled for the team: use `apps move`.
+
 ### config
 
 Heroku-style environment variables (`heroku config` / `config:get` / `config:set` / `config:unset`).
@@ -224,8 +256,15 @@ appliku datastores list    --team <team_path> --app <id>
 appliku datastores start   --team <team_path> --app <id> --id <datastore_id>
 appliku datastores stop    --team <team_path> --app <id> --id <datastore_id>
 appliku datastores restart --team <team_path> --app <id> --id <datastore_id>
+appliku datastores redeploy --team <team_path> --app <id> --id <datastore_id> [--yes]
 appliku datastores delete  --team <team_path> --app <id> --id <datastore_id>
 ```
+
+`datastores list` has a `problem` column: `failed` (the last deployment failed)
+or `stuck` (no result after 15 minutes). `datastores redeploy` deploys the
+datastore again with its saved settings (data, user, password and app env vars
+do not change); it is the fix for these two problems, not for a slow database or
+a wrong password. A 409 means another action runs on the datastore: wait.
 
 ### volumes
 
@@ -386,8 +425,28 @@ client.datastores.create("my-team", app_id=42, name="mydb", kind="postgresql")
 client.datastores.start("my-team", app_id=42, datastore_id=5)
 client.datastores.stop("my-team", app_id=42, datastore_id=5)
 client.datastores.restart("my-team", app_id=42, datastore_id=5)
+client.datastores.redeploy("my-team", app_id=42, datastore_id=5)  # 0.10.0
 client.datastores.delete("my-team", app_id=42, datastore_id=5)
 ```
+
+### moves (0.10.0)
+
+```python
+from appliku.resources.moves import plan_ready, unmoved_keys
+
+client.moves.targets("my-team", 42)                      # app_refusals, servers[].refusals
+move = client.moves.create("my-team", 42, target_server=17)
+move = client.moves.wait_for("my-team", 42, move.id, until="plan_ready")
+# move.preview: blockers, warnings, unmoved, estimate; move.actions.<name>.allowed/reason
+client.moves.confirm("my-team", 42, move.id, name="myapp", accept_unmoved=unmoved_keys(move))
+move = client.moves.wait_for("my-team", 42, move.id, until="settled")
+client.moves.logs("my-team", 42, move.id, after=None)
+client.moves.finish("my-team", 42, move.id)
+client.moves.rollback("my-team", 42, move.id, accept_data_loss=True)
+# also: list, latest, get, confirm_downtime, cancel, retry, remove_forwarders, cleanup_now
+```
+
+Pass `unmoved_keys(move)` only after the user accepted that these mounts are not moved.
 
 ### volumes
 
@@ -466,6 +525,7 @@ from appliku import (
     AuthenticationError,
     AuthorizationError,
     NotFoundError,
+    ConflictError,
     ValidationError,
     RateLimitError,
     ServerError,
@@ -485,9 +545,14 @@ except NotFoundError as exc:
 | `AuthenticationError` | 401 |
 | `AuthorizationError` | 403 |
 | `NotFoundError` | 404 |
+| `ConflictError` (0.10.0) | 409 |
 | `ValidationError` | 400 |
 | `RateLimitError` | 429 |
 | `ServerError` | 5xx |
+
+Every exception has `status_code`, `response` (the body), `code` (the body's
+`code`, for example `operation_gate`, `datastore_busy`) and, for a refused move
+plan, `refusals` and `warnings`.
 
 ## Common Workflows
 
