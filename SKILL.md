@@ -182,10 +182,10 @@ appliku apps move plan    --team <team_path> --app <id> --to <server id or name>
 appliku apps move confirm --team <team_path> --app <id> --name <app name> \
   [--accept-unmoved <key> ...]                                   # starts the move: downtime
 appliku apps move status  --team <team_path> --app <id> --follow # until hold, end, or it waits for you
-appliku apps move finish  --team <team_path> --app <id>          # end the hold; no rollback after this
-appliku apps move rollback --team <team_path> --app <id> --accept-data-loss [--accept-new-domains]
+appliku apps move finish  --team <team_path> --app <id> --move <move_id>   # end the hold; no rollback after this
+appliku apps move rollback --team <team_path> --app <id> --move <move_id> --accept-data-loss [--accept-new-domains]
 # also: list, cancel, retry, confirm-downtime, remove-forwarders, cleanup-now
-# (each takes --team, --app, optional --move <move_id>; the prompts take --yes)
+# (each takes --team, --app, --move <move_id>; the prompts take --yes)
 ```
 
 - The plan only reads both servers; nothing changes until `confirm`. A plan
@@ -196,7 +196,8 @@ appliku apps move rollback --team <team_path> --app <id> --accept-data-loss [--a
 - After the switch the move is in a hold (7 days): `rollback` moves the app back
   and loses the data written on the new server since the move; `finish` ends the
   hold early. Both are user decisions: ask first.
-- Every command uses the newest move unless `--move` is given. `status` prints
+- `cancel`, `finish`, `rollback`, `remove-forwarders` and `cleanup-now` need
+  `--move`; the other commands use the newest move without it. `status` prints
   the actions that are possible now; the API can still refuse, and the CLI then
   prints the reason (exit 1).
 - SDK `client.apps.update(server=...)` does not move data and is refused (400)
@@ -443,10 +444,13 @@ if plan_ready(move) and (move.preview or {}).get("can_continue"):
     # unmoved_keys(move): the mounts that do not move. Show them to the user and
     # pass only the keys that the user accepted.
     client.moves.confirm("my-team", 42, move.id, name="myapp", accept_unmoved=accepted_keys)
-move = client.moves.wait_for("my-team", 42, move.id, until="settled")
+move = client.moves.wait_for("my-team", 42, move.id, until="settled", timeout=6 * 3600)
 client.moves.logs("my-team", 42, move.id, after=None)
-client.moves.finish("my-team", 42, move.id)
-client.moves.rollback("my-team", 42, move.id, accept_data_loss=True)
+if move.status.value == "holding":
+    # Ask the user. finish ends the rollback option; rollback loses the data
+    # written on the new server since the move. Call one of them, not both.
+    client.moves.finish("my-team", 42, move.id)
+    # or: client.moves.rollback("my-team", 42, move.id, accept_data_loss=True)
 # also: list, latest, get, confirm_downtime, cancel, retry, remove_forwarders, cleanup_now
 ```
 
