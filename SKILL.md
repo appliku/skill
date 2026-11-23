@@ -446,11 +446,11 @@ if plan_ready(move) and (move.preview or {}).get("can_continue"):
     client.moves.confirm("my-team", 42, move.id, name="myapp", accept_unmoved=accepted_keys)
 move = client.moves.wait_for("my-team", 42, move.id, until="settled", timeout=6 * 3600)
 client.moves.logs("my-team", 42, move.id, after=None)
-if move.status.value == "holding":
-    # Ask the user. finish ends the rollback option; rollback loses the data
-    # written on the new server since the move. Call one of them, not both.
-    client.moves.finish("my-team", 42, move.id)
-    # or: client.moves.rollback("my-team", 42, move.id, accept_data_loss=True)
+# In the hold (move.status.value == "holding"), ASK THE USER first. finish ends
+# the rollback option; rollback loses the data written on the new server since
+# the move. Call one of them only after the user chose it:
+#   client.moves.finish("my-team", 42, move.id)
+#   client.moves.rollback("my-team", 42, move.id, accept_data_loss=True)
 # also: list, latest, get, confirm_downtime, cancel, retry, remove_forwarders, cleanup_now
 ```
 
