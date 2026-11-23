@@ -264,7 +264,8 @@ appliku datastores delete  --team <team_path> --app <id> --id <datastore_id>
 or `stuck` (no result after 15 minutes). `datastores redeploy` deploys the
 datastore again with its saved settings (data, user, password and app env vars
 do not change); it is the fix for these two problems, not for a slow database or
-a wrong password. A 409 means another action runs on the datastore: wait.
+a wrong password. A 409 refuses the redeploy: show its text to the user (for
+example another action runs on the datastore: wait; or contact support).
 
 ### volumes
 
@@ -438,7 +439,10 @@ client.moves.targets("my-team", 42)                      # app_refusals, servers
 move = client.moves.create("my-team", 42, target_server=17)
 move = client.moves.wait_for("my-team", 42, move.id, until="plan_ready")
 # move.preview: blockers, warnings, unmoved, estimate; move.actions.<name>.allowed/reason
-client.moves.confirm("my-team", 42, move.id, name="myapp", accept_unmoved=unmoved_keys(move))
+if plan_ready(move) and (move.preview or {}).get("can_continue"):
+    # unmoved_keys(move): the mounts that do not move. Show them to the user and
+    # pass only the keys that the user accepted.
+    client.moves.confirm("my-team", 42, move.id, name="myapp", accept_unmoved=accepted_keys)
 move = client.moves.wait_for("my-team", 42, move.id, until="settled")
 client.moves.logs("my-team", 42, move.id, after=None)
 client.moves.finish("my-team", 42, move.id)
@@ -446,7 +450,7 @@ client.moves.rollback("my-team", 42, move.id, accept_data_loss=True)
 # also: list, latest, get, confirm_downtime, cancel, retry, remove_forwarders, cleanup_now
 ```
 
-Pass `unmoved_keys(move)` only after the user accepted that these mounts are not moved.
+Never accept unmoved mounts for the user: their data stays on the old server.
 
 ### volumes
 
