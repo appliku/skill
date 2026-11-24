@@ -184,8 +184,12 @@ appliku apps move confirm --team <team_path> --app <id> --name <app name> \
 appliku apps move status  --team <team_path> --app <id> --follow # until hold, end, or it waits for you
 appliku apps move finish  --team <team_path> --app <id> --move <move_id>   # end the hold; no rollback after this
 appliku apps move rollback --team <team_path> --app <id> --move <move_id> --accept-data-loss [--accept-new-domains]
+# A server of the move is gone or does not answer (the move page lists the kept copies):
+appliku apps move abandon          --team <team_path> --app <id> --move <move_id>  # end the move; no data is deleted
+appliku apps move start-old-copy   --team <team_path> --app <id> --move <move_id>  # the kept copy runs as the app again
+appliku apps move remove-kept-copy --team <team_path> --app <id> --move <move_id> [--name <app name>]  # cannot be undone
 # also: list, cancel, retry, confirm-downtime, remove-forwarders, cleanup-now
-# (each takes --team, --app, --move <move_id>; the prompts take --yes)
+# (each takes --team and --app; all but list take --move <move_id>; the prompts take --yes)
 ```
 
 - The plan only reads both servers; nothing changes until `confirm`. A plan
@@ -196,12 +200,41 @@ appliku apps move rollback --team <team_path> --app <id> --move <move_id> --acce
 - After the switch the move is in a hold (7 days): `rollback` moves the app back
   and loses the data written on the new server since the move; `finish` ends the
   hold early. Both are user decisions: ask first.
-- `cancel`, `finish`, `rollback`, `remove-forwarders` and `cleanup-now` need
-  `--move`; the other commands use the newest move without it. `status` prints
+- `cancel`, `finish`, `rollback`, `remove-forwarders`, `cleanup-now`,
+  `abandon`, `start-old-copy` and `remove-kept-copy` need `--move`; `status`,
+  `retry` and `confirm-downtime` use the newest move without it. `status` prints
   the actions that are possible now; the API can still refuse, and the CLI then
   prints the reason (exit 1).
 - SDK `client.apps.update(server=...)` does not move data and is refused (400)
   for an app with data when moves are enabled for the team: use `apps move`.
+- When a server of a move is deleted or does not answer, Appliku keeps the
+  copy of the application that is left (a "kept copy"). All three actions below
+  are user decisions: ask first, and check `actions.abandon`,
+  `actions.start_old_copy` and `actions.remove_kept_copy` (`allowed`, `reason`).
+  - `abandon` (a move that has not ended: a server does not answer, a step
+    waits too long, or a start of the old copy runs) ends the move now or at
+    the latest in one hour. No data is deleted; the application stays where it
+    runs now. If the server answers again later, the copy on it can start again
+    by itself. Show the user the text of `abandon_preview` first.
+  - An ended move lists its kept copies in `status --output json` under
+    `kept_copies` (`kind`, `server_id`, `server_name`, `folders`, `may_run`,
+    `removal_at`). Only a stopped old copy (`source_copy`) of a move that
+    switched and was not rolled back is removed automatically, and not earlier
+    than 30 days after the end of the move (`removal_at`; null when there is no
+    automatic removal). `start-old-copy` and `remove-kept-copy` print the kept
+    copies before they ask.
+  - `start-old-copy` makes the kept copy the application again (the app, its
+    datastores, DNS, nginx and cron jobs go to the server of that copy). The
+    data written on the other server since then is lost. Today only a kept
+    `source_copy` (the old copy on the old server, after the switch and with no
+    rollback) can start; for the other kinds the refusal names the other ways
+    (copy the files from the listed folders, or remove the copy). If the gone
+    server still runs but does not answer, both copies can run at the same
+    time: tell the user to stop or destroy that server at the provider first.
+  - `remove-kept-copy` asks Appliku to remove the kept copies that it can
+    remove; the log of the move names the copies that stay. It can delete the
+    last copy of the application and its data. Never pass `--yes` or `--name`
+    without the user's explicit decision.
 
 ### config
 
@@ -451,6 +484,13 @@ client.moves.logs("my-team", 42, move.id, after=None)
 # the move. Call one of them only after the user chose it:
 #   client.moves.finish("my-team", 42, move.id)
 #   client.moves.rollback("my-team", 42, move.id, accept_data_loss=True)
+# A server of a running move does not answer (show move.abandon_preview to the user):
+#   client.moves.abandon("my-team", 42, move.id)
+# An ended move with kept copies (move.kept_copies is not empty):
+#   client.moves.start_old_copy("my-team", 42, move.id, accept_data_loss=True)
+#   client.moves.remove_kept_copy("my-team", 42, move.id, confirm_name="myapp")
+# User decisions only. Check move.actions.abandon / start_old_copy / remove_kept_copy
+# (.allowed, .reason) first.
 # also: list, latest, get, confirm_downtime, cancel, retry, remove_forwarders, cleanup_now
 ```
 
