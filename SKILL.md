@@ -220,8 +220,10 @@ appliku apps move remove-kept-copy --team <team_path> --app <id> --move <move_id
   shows each datastore with its method and the flag for one that can use it.
   After `confirm` Appliku tests the dump and the restore while the
   application runs; a failed test ends the move with no downtime. When the
-  measured downtime is longer than the confirmed one, the move waits for
-  `confirm-downtime`. Settings outside the databases (for example
+  measured downtime is more than 2 x the confirmed one + 5 minutes, the move
+  waits for `confirm-downtime`. A change of the database after the plan
+  cancels the move before the downtime; a change in the last minutes stops
+  the switch (downtime, then the old server runs again). Settings outside the databases (for example
   `ALTER SYSTEM` values, a changed `pg_hba.conf`, MySQL `SET PERSIST`) are
   "Not moved" items. To change the method, make a new plan with the flag.
   SDK: `client.moves.create(team, app, server_id, dump_restore=[ids])`.
