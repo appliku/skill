@@ -174,13 +174,15 @@ create immediately just returns the same 400.
 
 Move a server-mode application (with its standalone datastores and volumes) to
 another server of the team. Team owners and admins only; `targets`, `plan` and
-`confirm` answer 403 while moves are not enabled for the team. Needs CLI 0.10.0.
+`confirm` answer 403 while moves are not enabled for the team. Needs CLI 0.10.0
+(the move to a cluster, `--accept-rebuild` and `recover-without-stop-proof`
+need CLI 0.11.0).
 
 ```bash
 appliku apps move targets --team <team_path> --app <id>          # "ok" or the first refusal per server
 appliku apps move plan    --team <team_path> --app <id> --to <server id or name> --wait
 appliku apps move confirm --team <team_path> --app <id> --name <app name> \
-  [--accept-unmoved <key> ...]                                   # starts the move: downtime
+  [--accept-unmoved <key> ...] [--accept-rebuild]                # starts the move: downtime
 appliku apps move status  --team <team_path> --app <id> --follow # until hold, end, or it waits for you
 appliku apps move finish  --team <team_path> --app <id> --move <move_id>   # end the hold; no rollback after this
 appliku apps move rollback --team <team_path> --app <id> --move <move_id> --accept-data-loss [--accept-new-domains]
@@ -194,6 +196,9 @@ appliku apps move remove-kept-copy --team <team_path> --app <id> --move <move_id
 
 - The plan only reads both servers; nothing changes until `confirm`. A plan
   expires after 24 hours. Blockers in the plan stop the move; read them.
+- `confirm` starts the move and the downtime. Show the plan (downtime,
+  warnings, unmoved mounts) to the user and run `confirm` only after the user
+  chose to start the move.
 - `--accept-unmoved` must name exactly the keys that the plan lists as "Not
   moved". The data of these mounts stays on the old server; the application on
   the new server does not get it. Do not accept them for the user without asking.
@@ -205,6 +210,9 @@ appliku apps move remove-kept-copy --team <team_path> --app <id> --move <move_id
   `retry` and `confirm-downtime` use the newest move without it. `status` prints
   the actions that are possible now; the API can still refuse, and the CLI then
   prints the reason (exit 1).
+- `--accept-rebuild` (CLI 0.11.0): the plan says "Build on the new server" when
+  the new server has another CPU architecture; the confirm then needs this flag.
+  Show the plan item to the user and pass the flag only after the user accepted it.
 - SDK `client.apps.update(server=...)` does not move data and is refused (400)
   for an app with data when moves are enabled for the team: use `apps move`.
 - When a server of a move is deleted or does not answer, Appliku keeps the
@@ -235,6 +243,51 @@ appliku apps move remove-kept-copy --team <team_path> --app <id> --move <move_id
     remove; the log of the move names the copies that stay. It can delete the
     last copy of the application and its data. Never pass `--yes` or `--name`
     without the user's explicit decision.
+
+#### Move to a cluster (CLI 0.11.0)
+
+A server-mode application can also move to a cluster of the team. Only the
+application moves; its datastores stay on the old server and the cluster
+connects to them. This is available only when Appliku enables the move to a
+cluster for the team (else `plan --to-cluster` answers 403, and `targets`
+lists no clusters).
+
+```bash
+appliku apps move targets --team <team_path> --app <id>          # also lists the clusters, "ok" or the refusal
+appliku apps move plan    --team <team_path> --app <id> --to-cluster <cluster id or name> \
+  [--scale <process>=<n> ...] --wait                             # replicas 0-100 per process
+# confirm, status, finish: as above
+appliku apps move rollback --team <team_path> --app <id> --move <move_id> [--accept-new-domains]  # no --accept-data-loss
+appliku apps move recover-without-stop-proof --team <team_path> --app <id> --move <move_id>
+```
+
+- Give `plan` exactly one of `--to` and `--to-cluster`; `--scale` only with
+  `--to-cluster`. Without `--scale`, a process with 0 replicas stays at 0 and
+  every other process gets 1. The plan shows the new address (the load balancer IP),
+  "Database access", the replicas, the warnings and the refusals. To change
+  the replicas, `cancel` the move and make a new plan.
+- **Static site:** after a move to a cluster, a rollback is not possible. The
+  plan, `status` and `confirm` print "No rollback: After the move, a rollback
+  of this static site is not possible. You can only finish the move."
+  (`rollback_supported` is false, the text is in `rollback_refusal`). Tell the
+  user this before the confirm, and confirm only after the user agrees.
+- The rollback of a move to a cluster needs no `--accept-data-loss`: the
+  datastores stayed on the old server. `--accept-new-domains` is still needed
+  when domains were added in the hold (they have no certificate on the old
+  server): tell the user. The rollback is a user decision: ask first.
+- `start-old-copy` of a move to a cluster also accepts the shared-database
+  risk: "The copy on the cluster can still run and use the same databases
+  until Appliku can stop it." The CLI shows this text and asks; the answer
+  (or `--yes`) accepts it. The CLI has no separate flag; the SDK and the API
+  need `accept_shared_database=True`. Never pass `--yes` without the user's
+  explicit decision.
+- `recover-without-stop-proof`: when a move to a cluster fails before its
+  switch and Appliku cannot prove that the application stopped on the
+  cluster, the move waits (`status --follow` stops there;
+  `actions.recover_without_stop_proof.allowed` is true). This command starts
+  the application on the old server without the proof. The same
+  shared-database risk applies (the prompt or `--yes` accepts it). Ask the
+  user first.
 
 ### config
 
@@ -464,19 +517,27 @@ client.datastores.redeploy("my-team", app_id=42, datastore_id=5)  # 0.10.0
 client.datastores.delete("my-team", app_id=42, datastore_id=5)
 ```
 
-### moves (0.10.0)
+### moves (0.10.0; cluster moves 0.11.0)
 
 ```python
 from appliku.resources.moves import plan_ready, unmoved_keys
 
 client.moves.targets("my-team", 42)                      # app_refusals, servers[].refusals
 move = client.moves.create("my-team", 42, target_server=17)
+# 0.11.0, a move to a cluster (only when Appliku enables it for the team; else 403).
+# Give exactly one of target_server and target_cluster:
+#   move = client.moves.create("my-team", 42, target_cluster=37, scales={"web": 2})
+# move.rollback_supported is False (move.rollback_refusal): a static site has no
+# rollback after the move. Tell the user before the confirm.
 move = client.moves.wait_for("my-team", 42, move.id, until="plan_ready")
 # move.preview: blockers, warnings, unmoved, estimate; move.actions.<name>.allowed/reason
-if plan_ready(move) and (move.preview or {}).get("can_continue"):
+# confirm starts the move and the downtime: show the plan to the user and
+# confirm only after the user chose to start it.
+if plan_ready(move) and (move.preview or {}).get("can_continue") and user_chose_to_start:
     # unmoved_keys(move): the mounts that do not move. Show them to the user and
     # pass only the keys that the user accepted.
     client.moves.confirm("my-team", 42, move.id, name="myapp", accept_unmoved=accepted_keys)
+    # 0.11.0: add accept_rebuild=True only when the plan has preview.rebuild and the user accepted it.
 move = client.moves.wait_for("my-team", 42, move.id, until="settled", timeout=6 * 3600)
 client.moves.logs("my-team", 42, move.id, after=None)
 # In the hold (move.status.value == "holding"), ASK THE USER first. finish ends
@@ -484,12 +545,20 @@ client.moves.logs("my-team", 42, move.id, after=None)
 # the move. Call one of them only after the user chose it:
 #   client.moves.finish("my-team", 42, move.id)
 #   client.moves.rollback("my-team", 42, move.id, accept_data_loss=True)
+#   (a move to a cluster: the API ignores accept_data_loss, the datastores stayed;
+#   the SDK argument is still required, False is fine)
 # A server of a running move does not answer (show move.abandon_preview to the user):
 #   client.moves.abandon("my-team", 42, move.id)
 # An ended move with kept copies (move.kept_copies is not empty):
 #   client.moves.start_old_copy("my-team", 42, move.id, accept_data_loss=True)
+#   (a move to a cluster: also accept_shared_database=True; the copy on the cluster
+#   can still run and use the same databases until Appliku can stop it)
+# A move to a cluster waits for the stop-proof decision
+# (move.actions.recover_without_stop_proof.allowed):
+#   client.moves.recover_without_stop_proof("my-team", 42, move.id, accept_shared_database=True)
 #   client.moves.remove_kept_copy("my-team", 42, move.id, confirm_name="myapp")
-# User decisions only. Check move.actions.abandon / start_old_copy / remove_kept_copy
+# User decisions only. Check move.actions.abandon / start_old_copy / remove_kept_copy /
+# recover_without_stop_proof
 # (.allowed, .reason) first.
 # also: list, latest, get, confirm_downtime, cancel, retry, remove_forwarders, cleanup_now
 ```
