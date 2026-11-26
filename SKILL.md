@@ -176,11 +176,12 @@ Move a server-mode application (with its standalone datastores and volumes) to
 another server of the team. Team owners and admins only; `targets`, `plan` and
 `confirm` answer 403 while moves are not enabled for the team. Needs CLI 0.10.0
 (the move to a cluster, `--accept-rebuild` and `recover-without-stop-proof`
-need CLI 0.11.0).
+need CLI 0.11.0; `--dump-restore` needs CLI 0.12.0).
 
 ```bash
 appliku apps move targets --team <team_path> --app <id>          # "ok" or the first refusal per server
-appliku apps move plan    --team <team_path> --app <id> --to <server id or name> --wait
+appliku apps move plan    --team <team_path> --app <id> --to <server id or name> --wait \
+  [--dump-restore <datastore id> ...]                            # Postgres/MySQL: dump and restore
 appliku apps move confirm --team <team_path> --app <id> --name <app name> \
   [--accept-unmoved <key> ...] [--accept-rebuild]                # starts the move: downtime
 appliku apps move status  --team <team_path> --app <id> --follow # until hold, end, or it waits for you
@@ -213,6 +214,17 @@ appliku apps move remove-kept-copy --team <team_path> --app <id> --move <move_id
 - `--accept-rebuild` (CLI 0.11.0): the plan says "Build on the new server" when
   the new server has another CPU architecture; the confirm then needs this flag.
   Show the plan item to the user and pass the flag only after the user accepted it.
+- `--dump-restore <datastore id>` (CLI 0.12.0, repeat; only with `--to`): a
+  Postgres-family or MySQL datastore moves by dump and restore instead of a
+  copy of its data folder. It is safer and the downtime is longer. The plan
+  shows each datastore with its method and the flag for one that can use it.
+  After `confirm` Appliku tests the dump and the restore while the
+  application runs; a failed test ends the move with no downtime. When the
+  measured downtime is longer than the confirmed one, the move waits for
+  `confirm-downtime`. Settings outside the databases (for example
+  `ALTER SYSTEM` values, a changed `pg_hba.conf`, MySQL `SET PERSIST`) are
+  "Not moved" items. To change the method, make a new plan with the flag.
+  SDK: `client.moves.create(team, app, server_id, dump_restore=[ids])`.
 - SDK `client.apps.update(server=...)` does not move data and is refused (400)
   for an app with data when moves are enabled for the team: use `apps move`.
 - When a server of a move is deleted or does not answer, Appliku keeps the
