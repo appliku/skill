@@ -265,24 +265,29 @@ appliku apps move remove-kept-copy --team <team_path> --app <id> --move <move_id
 
 #### Move to a cluster (CLI 0.11.0)
 
-A server-mode application can also move to a cluster of the team. Only the
-application moves; its datastores stay on the old server and the cluster
-connects to them. This is available only when Appliku enables the move to a
-cluster for the team (else `plan --to-cluster` answers 403, and `targets`
-lists no clusters).
+A server-mode application can also move to a cluster of the team. By
+default only the application moves; its datastores stay on the old server and
+the cluster connects to them. With `--move-datastore` (CLI 0.13.0) a datastore
+moves into a database node of the cluster (a node with the database label):
+the data folder is copied, or `<id>:dump` moves a PostgreSQL or MySQL
+datastore by dump and restore. This is available only when Appliku enables
+the move to a cluster for the team (else `plan --to-cluster` answers 403, and
+`targets` lists no clusters).
 
 ```bash
 appliku apps move targets --team <team_path> --app <id>          # also lists the clusters, "ok" or the refusal
 appliku apps move plan    --team <team_path> --app <id> --to-cluster <cluster id or name> \
-  [--scale <process>=<n> ...] --wait                             # replicas 0-100 per process
-# confirm, status, finish: as above
-appliku apps move rollback --team <team_path> --app <id> --move <move_id> [--accept-new-domains]  # no --accept-data-loss
+  [--scale <process>=<n> ...] [--move-datastore <datastore id>[:dump] ...] --wait
+# confirm, status, finish: as above; a move of datastores can ask for confirm-downtime
+appliku apps move rollback --team <team_path> --app <id> --move <move_id> [--accept-new-domains] \
+  [--accept-data-loss]    # --accept-data-loss only when datastores moved into the cluster
 appliku apps move recover-without-stop-proof --team <team_path> --app <id> --move <move_id>
 ```
 
 - Give `plan` exactly one of `--to` and `--to-cluster`; `--scale` only with
   `--to-cluster`. Without `--scale`, a process with 0 replicas stays at 0 and
-  every other process gets 1. The plan shows the new address (the load balancer IP),
+  every other process gets 1. `--move-datastore` only with `--to-cluster`.
+  The plan shows the new address (the load balancer IP),
   "Database access", the replicas, the warnings and the refusals. To change
   the replicas, `cancel` the move and make a new plan.
 - **Static site:** after a move to a cluster, a rollback is not possible. The
@@ -290,8 +295,16 @@ appliku apps move recover-without-stop-proof --team <team_path> --app <id> --mov
   of this static site is not possible. You can only finish the move."
   (`rollback_supported` is false, the text is in `rollback_refusal`). Tell the
   user this before the confirm, and confirm only after the user agrees.
-- The rollback of a move to a cluster needs no `--accept-data-loss`: the
-  datastores stayed on the old server. `--accept-new-domains` is still needed
+- **Datastores into the cluster:** the plan lists each datastore ("stays on
+  the old server" / "moves into the cluster, node <name>"). Moved datastores
+  stop during the switch (the downtime estimate includes the copy). The
+  external address of a moved datastore changes to the node IP (same port).
+  Their local backup files stay on the old server. Ask the user which
+  datastores move and by which method before the plan.
+- The rollback of a move to a cluster needs no `--accept-data-loss` when the
+  datastores stayed on the old server; when datastores moved into the
+  cluster it needs `--accept-data-loss` (the data written on the cluster
+  since the switch is lost): tell the user and ask first. `--accept-new-domains` is still needed
   when domains were added in the hold (they have no certificate on the old
   server): tell the user. The rollback is a user decision: ask first.
 - `start-old-copy` of a move to a cluster also accepts the shared-database
@@ -546,6 +559,8 @@ move = client.moves.create("my-team", 42, target_server=17)
 # 0.11.0, a move to a cluster (only when Appliku enables it for the team; else 403).
 # Give exactly one of target_server and target_cluster:
 #   move = client.moves.create("my-team", 42, target_cluster=37, scales={"web": 2})
+# 0.13.0, datastores into the cluster (dump_restore: a subset of move_datastores):
+#   move = client.moves.create("my-team", 42, target_cluster=37, move_datastores=[5, 6], dump_restore=[5])
 # move.rollback_supported is False (move.rollback_refusal): a static site has no
 # rollback after the move. Tell the user before the confirm.
 move = client.moves.wait_for("my-team", 42, move.id, until="plan_ready")
