@@ -214,6 +214,11 @@ appliku apps move remove-kept-copy --team <team_path> --app <id> --move <move_id
 - `--accept-rebuild` (CLI 0.11.0): the plan says "Build on the new server" when
   the new server has another CPU architecture; the confirm then needs this flag.
   Show the plan item to the user and pass the flag only after the user accepted it.
+  On such a move every Postgres-family and MySQL datastore moves by dump and
+  restore (no choice; `--dump-restore` is not needed), and a Postgres 18, 19
+  or pgvector datastore is built again on the new server (the same item and
+  flag; its extensions can get a newer version). PostGIS types `postgis` and
+  `postgis_16_34` cannot move to arm64 (blocker `datastore_image_arch`).
 - `--dump-restore <datastore id>` (CLI 0.12.0, repeat; only with `--to`): a
   Postgres-family or MySQL datastore moves by dump and restore instead of a
   copy of its data folder. It is safer and the downtime is longer. The plan
